@@ -1,11 +1,14 @@
 #!/bin/bash
 
+CAVEATS=()
+
 onerror() {
     log "Package $FORMULA failed to build"
 }
 
 onexit() {
-    log "$OURNAME -- exiting, last formula -- $FORMULA"
+    for line in "${CAVEATS[@]}"; do log $line; done
+    log "Exiting"
 }
 
 setup_traps() {
@@ -22,7 +25,7 @@ log() {
 }
 
 log_success() {
-    log "$OURNAME -- Package $FORMULA -- success"
+    log "Package $FORMULA -- success"
 }
 
 pushd_src() {
@@ -30,45 +33,45 @@ pushd_src() {
 }
 
 do_configure() {
-    ./configure --prefix="$PREFIX" "$@" 2>&1 | $CONFIGURE_FILTER | tee $COMPILEDIR/$TARNAME-configure.log || exit 1
+    ./configure --prefix="$PREFIX" "$@" 2>&1 | $CONFIGURE_FILTER | tee $COMPILEDIR/$TARNAME-configure.log || return 1
 }
 
 do_configure_outside() {
-    "$SRCDIR"/configure --prefix="$PREFIX" "$@" 2>&1 | tee $COMPILEDIR/$TARNAME-configure.log || exit 1
+    "$SRCDIR"/configure --prefix="$PREFIX" "$@" 2>&1 | tee $COMPILEDIR/$TARNAME-configure.log || return 1
 }
 
 do_make() {
     local PARALLEL="-j4"
     [ "$NOPARALLEL" = "1" ] && PARALLEL=
-    make $PARALLEL "$@" 2>&1 | tee $COMPILEDIR/$TARNAME-make.log || exit 1
+    make $PARALLEL "$@" 2>&1 | tee $COMPILEDIR/$TARNAME-make.log || return 1
 }
 
 do_install() {
-    make install "$@" 2>&1 | tee $COMPILEDIR/$TARNAME-makeinstall.log || exit 1
+    make install "$@" 2>&1 | tee $COMPILEDIR/$TARNAME-makeinstall.log || return 1
 }
 
 do_make_and_install() {
-    do_make "$@" || exit 1
-    do_install "$@" || exit 1
+    do_make "$@" || return 1
+    do_install "$@" || return 1
 }
 
 do_compile() {
-    pushd_src || exit 1
-    do_configure "$@" || exit 1
-    do_make_and_install || exit 1
-    popd || exit 1
+    pushd_src || return 1
+    do_configure "$@" || return 1
+    do_make_and_install || return 1
+    popd || return 1
 }
 
 
 do_compile_outside() {
     local BUILDDIR="$SRCDIR"-build
 
-    rm -rf "$BUILDDIR" || exit 1
-    mkdir -p "$BUILDDIR" || exit 1
-    pushd "$BUILDDIR" || exit 1
-    do_configure_outside "$@" || exit 1
-    do_make_and_install || exit 1
-    popd || exit 1
+    rm -rf "$BUILDDIR" || return 1
+    mkdir -p "$BUILDDIR" || return 1
+    pushd "$BUILDDIR" || return 1
+    do_configure_outside "$@" || return 1
+    do_make_and_install || return 1
+    popd || return 1
 }
 
 ##
@@ -79,15 +82,15 @@ do_compile_outside() {
 ##
 ## alternative usage: do_unpack foo-1.2.3.tar.bz2
 do_unpack() {
-    [ -f "$TARDIR"/"$1" ] && TARNAME="$1"
-    [ -z "$TARNAME" ] && echo "TARNAME is empty!" && exit 1
+    [ -f "$TARDIR/$1" ] && TARNAME="$1"
+    [ -z "$TARNAME" ] && echo "TARNAME is empty!" && return 1
 
-    SRCDIR="$COMPILEDIR"/"$TARNAME"
+    SRCDIR="$COMPILEDIR/$TARNAME"
 
-    rm -rf "$SRCDIR"  || exit 1
-    mkdir -p "$SRCDIR"  || exit 1
-    tar -xf "$TARDIR/$TARNAME" -C "$SRCDIR" --strip-components 1 || exit 1
-    log "$OURNAME -- Unpacked $TARNAME"
+    rm -rf "$SRCDIR"  || return 1
+    mkdir -p "$SRCDIR"  || return 1
+    tar -xf "$TARDIR/$TARNAME" -C "$SRCDIR" --strip-components 1 || return 1
+    log "Unpacked $TARNAME"
 }
 
 ##
@@ -98,12 +101,12 @@ do_unpack() {
 ##
 ## alternative usage: do_undebian foo-1.2.3.orig.tar.bz2 foo-1.2.3.debian.tar.gz
 do_undebian() {
-    [ -f "$TARDIR"/"$1" ] && TARNAME="$1"
-    [ -f "$TARDIR"/"$2" ] && DEBPATCH="$2"
+    [ -f "$TARDIR/$1" ] && TARNAME="$1"
+    [ -f "$TARDIR/$2" ] && DEBPATCH="$2"
 
     ## sets SRCDIR
-    do_unpack "$TARNAME" || exit 1
-    do_debianize "$DEBPATCH" || exit 1
+    do_unpack "$TARNAME" || return 1
+    do_debianize "$DEBPATCH" || return 1
 }
 
 ##
@@ -113,20 +116,20 @@ do_undebian() {
 ##
 ## alternative usage: do_debianize foo-1.2.3.debian.tar.gz
 do_debianize() {
-    [ -f "$TARDIR"/"$1" ] && DEBPATCH="$1"
+    [ -f "$TARDIR/$1" ] && DEBPATCH="$1"
 
     do_undebian_overlay "$DEBPATCH"
     do_debian_patches
 }
 
 do_undebian_overlay() {
-    [ -f "$TARDIR"/"$1" ] && DEBPATCH="$1"
+    [ -f "$TARDIR/$1" ] && DEBPATCH="$1"
 
     ## unpack debian overlay -- try tar, gzip, xz, bz
     tar -xf "$TARDIR/$DEBPATCH" -C "$SRCDIR" ||
     gzip -cd "$TARDIR/$DEBPATCH" | patch -f -p1 -i - -d "$SRCDIR" ||
     xzcat "$TARDIR/$DEBPATCH" | patch -f -p1 -i - -d "$SRCDIR" ||
-    bzcat "$TARDIR/$DEBPATCH" | patch -f -p1 -i - -d "$SRCDIR" || exit 1
+    bzcat "$TARDIR/$DEBPATCH" | patch -f -p1 -i - -d "$SRCDIR" || return 1
 }
 
 do_debian_patches() {
@@ -155,7 +158,7 @@ do_debian_patches() {
 ##
 ## alternative usage: do_undebian_compile foo-1.2.3.orig.tar.bz2 foo-1.2.3.debian.tar.gz
 do_undebian_compile() {
-    if [ -f "$TARDIR"/"$1" -a -f "$TARDIR"/"$2" ]; then
+    if [ -f "$TARDIR/$1" -a -f "$TARDIR/$2" ]; then
         TARNAME="$1"
         DEBPATCH="$2"
         shift 2
@@ -171,7 +174,7 @@ do_undebian_compile() {
 ##
 ## alternative usage: do_unpack_compile foo-1.2.3.tar.bz2
 do_unpack_compile() {
-    if [ -f "$TARDIR"/"$1" ]; then
+    if [ -f "$TARDIR/$1" ]; then
         TARNAME="$1"
         shift 1
     fi
@@ -197,12 +200,13 @@ do_patch_inline() {
 }
 
 do_autoreconf() {
-    pushd_src || exit 1
-    autoreconf -f -i -v || exit 1
-    popd || exit 1
+    pushd_src || return 1
+    autoreconf -f -i -v || return 1
+    popd || return 1
 }
 
 ## usage: compile_package FORMULA [what formula asked for this one]
+## note about force option -- it's passed as parameter so forcing package A won't force package B that A depends on
 compile_package() {
     local COMPILING_FOR force FORMULA
     local DATE=`LANG=C LC_ALL=C date`
@@ -214,16 +218,18 @@ compile_package() {
     if [ ! -e "$STATEDIR"/"$FORMULA".installed -o -n "$force" ]; then
         [ -z "$COMPILING_FOR" ] && log "Building package: $FORMULA" \
                                 || log "Building package: $FORMULA -- dependency of $COMPILING_FOR"
-
+        [ ! -e "$NORMDIR"/packages/"$FORMULA" ] && log "Error: Package file '$FORMULA' does not exist" && return 1
         . "$NORMDIR"/packages/"$FORMULA"
-        mkdir -p `dirname "$STATEDIR"/"$FORMULA"`
+        mkdir -p `dirname "$STATEDIR/$FORMULA"`
         log_success
-        touch "$STATEDIR"/"$FORMULA".installed
+        touch "$STATEDIR/$FORMULA".installed
+        ## remove artifacts
+        [ -z "$norm_keep_sources" -a -n "$COMPILEDIR" -a -n "$TARNAME" ] && rm -rf "$COMPILEDIR/$TARNAME"
     else
         [ -z "$COMPILING_FOR" ] && log "Package already installed: $FORMULA" \
                                 || log "Package already installed: $FORMULA -- wanted by $COMPILING_FOR"
     fi
-    [ -n "$COMPILING_FOR" ] && echo "[$DATE] Needed for $COMPILING_FOR" >> "$STATEDIR"/"$FORMULA".installed || true
+    [ -n "$COMPILING_FOR" ] && echo "[$DATE] Needed for $COMPILING_FOR" >> "$STATEDIR/$FORMULA".installed || true
 }
 
 depends_on() {
@@ -233,14 +239,14 @@ depends_on() {
 }
 
 fetch_file() {
-    [ -z "$1" ] && echo "fetch_file() needs at least 1 argument" && exit 1
+    [ -z "$1" ] && echo "fetch_file() needs at least 1 argument" && return 1
     local URL="$1"
     local SHA1="$2"
     local FILENAME=`basename "$URL"`
     mkdir -p "$TARDIR"
     if [ ! -e "$TARDIR"/$FILENAME ]; then
         log "Downloading $URL"
-        curl -L -R "$URL" -o "$TARDIR"/$FILENAME.temp || (rm -f "$TARDIR"/$FILENAME.temp && exit 1)
+        curl -L -R "$URL" -o "$TARDIR"/$FILENAME.temp || (rm -f "$TARDIR"/$FILENAME.temp && return 1)
         mv -f "$TARDIR"/$FILENAME{.temp,}
     fi
     SHA1SUM=`$SHASUM_BIN "$TARDIR/$FILENAME" | cut -f1 -d' '`
@@ -264,24 +270,94 @@ fetch_debian() {
 }
 
 ##
-## check if current compiler supports various flags
+## example: test_cc 'main() { return 0;}' -O2
+test_cc() {
+    CODE="$1"
+    shift
+    echo "$CODE" | cc -x c "$@" -o /dev/null - 2>/dev/null || true
+    local STATUS=${PIPESTATUS[1]}
+    [ -n "$STATUS" ] && return $STATUS
+    return 1
+}
+
 ##
-## if yes, add it to specified variable
-## if multiple flags, chooses first that's accepted
+## example: cc_checkflags -Wl,-Bsymbolic -O2
+cc_checkflags() {
+    test_cc 'int main() { int i; return 0;}' "$@"
+}
+
 ##
-## example: cc_supports EXTRA_CFLAGS -march=native -march=core2 -march=i686
-## example: cc_supports EXTRA_CFLAGS -Wextra
-cc_supports() {
+## check if compiler will accept the flag
+## first one accepted is added to specified variable
+##
+## example: cc_addflag EXTRA_CFLAGS -march=native -march=core2 -march=i686
+## example: cc_addflag EXTRA_CFLAGS -Wextra -W
+cc_addflag() {
     [ -z "$1" -o -z "$2" ] && return
     local value VARNAME=$1
     shift 1
     for value; do
-        echo 'int main() { int i; return 0;}' | cc -x c $CFLAGS ${!VARNAME} $value -o /dev/null - 2>/dev/null || true
-        local STATUS=${PIPESTATUS[1]}
-        [ -z "$STATUS" ] && continue
-        [ "$STATUS" -eq 0 ] && declare -g $VARNAME="${!VARNAME} $value"
+        [[ "${!VARNAME}" =~ "(^| )$value( |$)" ]] && return # already have it
+        cc_checkflags $CFLAGS ${!VARNAME} $value || continue
+        export $VARNAME="${!VARNAME} $value"
         return
     done
+}
+
+##
+## check if compiler will accept the flags
+## any flag that gets accepted will be added to specified variable
+cc_addflags() {
+    [ -z "$1" -o -z "$2" ] && return
+    local value VARNAME=$1
+    shift 1
+    for value; do
+        [[ "${!VARNAME}" =~ "(^| )$value( |$)" ]] && continue # already have it
+        cc_checkflags $CFLAGS ${!VARNAME} $value || continue
+        export $VARNAME="${!VARNAME} $value"
+    done
+}
+
+
+## test_cc_value "fcntl.h" "O_CLOEXEC"
+test_cc_value() {
+    test_cc "#define _GNU_SOURCE
+#include <$1>
+int main() { int a = $2; return 0;}"
+}
+
+## test_cc_func "stdio.h" 'printf("Hello, world!\n");'
+test_cc_func() {
+    test_cc "#include <$1>
+int main() { $2; return 0;}"
+}
+
+
+## Example: have_gcc 4.7
+have_gcc() {
+    [ -z "$1" ] && echo "have_gcc() needs an argument" && return 1
+    local HAVE_GCC_RAW=`gcc -dumpversion`
+    local HAVE_GCC=`echo "$HAVE_GCC_RAW" | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$/&00/'`
+    local ASKED_GCC=`echo "$1" | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$/&00/'`
+    [ "$HAVE_GCC" -lt "$ASKED_GCC" ] && return 1
+    return 0
+}
+
+## Example: require_gcc 4.7
+## Same as have_gcc, but prints a message doesn't print a message
+requires_gcc() {
+    [ -z "$1" ] && echo "require_gcc() needs an argument" && return 1
+    if ! have_gcc "$1"; then
+        local NEED_GCC_RAW="$1"
+        shift
+        local HAVE_GCC_RAW=`gcc -dumpversion`
+        log "Package $FORMULA needs GCC at least $NEED_GCC_RAW $@"
+        log "You have $HAVE_GCC_RAW"
+        log ""
+        log "Type 'norm install gcc' to install fresh gcc"
+        exit 1 ## we don't want onerror() to type 'package failed to build'
+    fi
+    return 0
 }
 
 add_to_ccache() {
@@ -289,4 +365,12 @@ add_to_ccache() {
     for name in "$@"; do
         ln -fs ../ccache $PREFIX/bin/ccache_wrap/"$name"
     done
+}
+
+add_caveat() {
+    CAVEATS+=("Formula $FORMULA has a message for you:")
+    for line; do
+        CAVEATS+=("$line")
+    done
+    CAVEATS+=("")
 }

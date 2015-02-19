@@ -31,11 +31,11 @@ setup_prefix() {
     default_ldflags="-L$PREFIX/lib"
     [[ $OSTYPE == *linux* ]] && default_ldflags+=" -Wl,-rpath=$PREFIX/lib -Wl,-rpath-link=$PREFIX/lib"
     [[ $OSTYPE == *darwin* ]] && default_ldflags+=" -Wl,-rpath,$PREFIX/lib"
-    default_cppflags="-I$PREFIX/include"
+    default_cppflags="-I$PREFIX/include -pipe"
     default_aclocal="$PREFIX/share/aclocal"
 
     addflags LDFLAGS $default_ldflags
-    addflags CPPFLAGS $default_cppflags
+    cc_addflags CPPFLAGS $default_cppflags
 
     ## set runtime flags
     addpath PATH "$PREFIX/bin" "$PREFIX/sbin" "$PREFIX/bin/ccache_wrap"
